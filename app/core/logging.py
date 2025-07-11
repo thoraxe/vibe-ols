@@ -26,12 +26,40 @@ def setup_logging():
     # Set specific log levels for different components
     logging.getLogger("uvicorn").setLevel(logging.INFO)
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)
-    logging.getLogger("fastapi").setLevel(logging.DEBUG)
+    logging.getLogger("fastapi").setLevel(logging.INFO)
     
-    # Enable debug logging if environment variable is set
-    if settings.DEBUG_MODE:
+    # Control third-party library logging - only show in VERBOSE mode
+    if settings.VERBOSE_MODE:
+        # In VERBOSE mode, enable all debug logs including third-party libraries
         logging.getLogger().setLevel(logging.DEBUG)
-        logger.debug("Debug mode enabled")
+        logger.info("🔍 Verbose mode enabled - all debug logs visible")
+    elif settings.DEBUG_MODE:
+        # In DEBUG mode, only enable debug logs for our application
+        logging.getLogger().setLevel(logging.INFO)  # Keep root at INFO
+        
+        # Enable debug logging for our application modules
+        logging.getLogger("app").setLevel(logging.DEBUG)
+        logging.getLogger("__main__").setLevel(logging.DEBUG)
+        
+        # Suppress noisy third-party library logs
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        logging.getLogger("asyncio").setLevel(logging.WARNING)
+        logging.getLogger("mcp").setLevel(logging.INFO)
+        logging.getLogger("openai").setLevel(logging.WARNING)
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
+        logging.getLogger("pydantic").setLevel(logging.WARNING)
+        logging.getLogger("requests").setLevel(logging.WARNING)
+        
+        logger.debug("🐛 Debug mode enabled - application debug logs visible")
+    else:
+        # Normal mode - INFO level for everything
+        logging.getLogger().setLevel(logging.INFO)
+        
+        # Still suppress some noisy libraries even in normal mode
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
     
     return logger
 

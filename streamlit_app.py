@@ -21,10 +21,23 @@ def main():
     st.sidebar.info("The Query endpoint uses Pydantic AI with OpenShift expertise to provide intelligent troubleshooting guidance!")
     st.sidebar.markdown("**Configuration:** The backend uses dotenv for environment management. Create a `.env` file with your OpenAI API key.")
     st.sidebar.markdown("**Streaming:** Enable real-time streaming responses for a better user experience!")
+    st.sidebar.markdown("**MCP Tools:** The AI agent can access external tools via Model Context Protocol (MCP) servers for enhanced capabilities!")
+    
+    # Add MCP server status
+    st.sidebar.markdown("### 🔧 MCP Server Status")
+    try:
+        response = requests.get(f"{API_BASE_URL}/", timeout=2)
+        if response.status_code == 200:
+            st.sidebar.success("✅ API Server Connected")
+        else:
+            st.sidebar.error("❌ API Server Error")
+    except requests.exceptions.RequestException:
+        st.sidebar.error("❌ API Server Offline")
+        st.sidebar.info("Make sure the FastAPI server is running on http://localhost:8000")
     
     # Sidebar for navigation
     st.sidebar.title("Navigation")
-    page = st.sidebar.radio("Select Operation", ["🤖 AI Query", "🔍 Investigate", "📥 Inbox"])
+    page = st.sidebar.radio("Select Operation", ["🤖 AI Query", "🔍 Investigate", "📥 Inbox", "🔧 MCP Tools"])
     
     if page == "🤖 AI Query":
         query_page()
@@ -32,6 +45,8 @@ def main():
         investigate_page()
     elif page == "📥 Inbox":
         inbox_page()
+    elif page == "🔧 MCP Tools":
+        mcp_tools_page()
 
 def query_page():
     st.header("📝 OpenShift Query")
@@ -42,7 +57,10 @@ def query_page():
            "- My pods are stuck in CrashLoopBackOff state. How do I troubleshoot this?\n"
            "- How do I check if my OpenShift cluster is healthy?\n"
            "- What are the best practices for OpenShift resource management?\n"
-           "- How do I troubleshoot networking issues in OpenShift?")
+           "- How do I troubleshoot networking issues in OpenShift?\n"
+           "- List all pods in the default namespace and check their status\n"
+           "- Show me the recent events in my cluster\n"
+           "- Get the logs from a failing pod and analyze them")
     
     with st.form("query_form"):
         query_text = st.text_area("Enter your OpenShift query:", height=100, 
@@ -218,6 +236,117 @@ def inbox_page():
                     st.info("Make sure the FastAPI server is running on http://localhost:8000")
             else:
                 st.error("Please enter a message")
+
+def mcp_tools_page():
+    st.header("🔧 MCP Tools")
+    st.write("View and test available MCP (Model Context Protocol) tools")
+    
+    # Add explanation
+    st.info("""
+    **MCP Tools** are external capabilities that the AI agent can use to enhance its responses.
+    These tools are loaded from configured MCP servers and can provide:
+    - OpenShift/Kubernetes cluster information
+    - Documentation searches
+    - Log analysis
+    - And more!
+    """)
+    
+    # Configuration section
+    st.subheader("📋 MCP Configuration")
+    st.write("To enable MCP tools, configure your `.env` file with:")
+    st.code("""
+# Enable MCP integration
+MCP_ENABLED=true
+
+# Configure MCP servers (comma-separated: name=endpoint)
+MCP_SERVERS=openshift_tools=http://localhost:8999/mcp
+
+# Optional: MCP connection timeout (default: 30 seconds)
+MCP_TIMEOUT=30
+""")
+    
+    # Tool status section
+    st.subheader("🔍 Available MCP Tools")
+    
+    if st.button("Refresh Tool List"):
+        with st.spinner("Loading MCP tools..."):
+            try:
+                # Try to get server info which might include MCP status
+                response = requests.get(f"{API_BASE_URL}/")
+                if response.status_code == 200:
+                    st.success("✅ Connected to API server")
+                    st.info("MCP tools are loaded automatically when the API server starts. Check the server logs for MCP tool loading status.")
+                else:
+                    st.error("❌ Could not connect to API server")
+            except requests.exceptions.RequestException:
+                st.error("❌ API server is not running")
+    
+    # Test query with MCP tools
+    st.subheader("🧪 Test MCP Tools")
+    st.write("Try a query that can benefit from MCP tools:")
+    
+    example_queries = [
+        "List all pods in the default namespace",
+        "Show me the configuration of my OpenShift cluster",
+        "Check the events in my cluster",
+        "Get the logs from a failing pod"
+    ]
+    
+    selected_query = st.selectbox("Example queries:", [""] + example_queries)
+    
+    if selected_query:
+        st.write(f"**Selected query:** {selected_query}")
+        if st.button("Test Query"):
+            payload = {"query": selected_query, "context": {}}
+            
+            with st.spinner("Testing query with MCP tools..."):
+                try:
+                    response = requests.post(f"{API_BASE_URL}/query", json=payload, timeout=30)
+                    if response.status_code == 200:
+                        result = response.json()
+                        st.success("✅ Query executed successfully!")
+                        st.json(result)
+                    else:
+                        st.error(f"❌ Query failed: {response.status_code} - {response.text}")
+                except requests.exceptions.RequestException as e:
+                    st.error(f"❌ Connection error: {e}")
+    
+    # Troubleshooting section
+    st.subheader("🔧 Troubleshooting")
+    st.write("Common MCP issues and solutions:")
+    
+    with st.expander("MCP Server Not Found"):
+        st.write("""
+        **Problem:** MCP server connection errors
+        
+        **Solutions:**
+        1. Check if your MCP server is running
+        2. Verify the MCP_SERVERS configuration in your .env file
+        3. Ensure the server endpoint is accessible
+        4. Check server logs for error messages
+        """)
+    
+    with st.expander("No Tools Available"):
+        st.write("""
+        **Problem:** MCP tools are not being loaded
+        
+        **Solutions:**
+        1. Verify MCP_ENABLED=true in your .env file
+        2. Check MCP_SERVERS configuration format
+        3. Restart the API server after configuration changes
+        4. Check server logs for MCP loading messages
+        """)
+    
+    with st.expander("Tool Execution Errors"):
+        st.write("""
+        **Problem:** MCP tools fail when called
+        
+        **Solutions:**
+        1. Check if required credentials are configured
+        2. Verify tool parameters are correct
+        3. Check MCP server logs for detailed error messages
+        4. Ensure the MCP server has necessary permissions
+        """)
 
 if __name__ == "__main__":
     main() 

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..models.requests import InvestigateRequest
 from ..models.responses import InvestigateResponse
+from ..agents.openshift_agent import process_investigation_with_context
 from ..core.logging import get_logger
 from ..utils.helpers import generate_id
 
@@ -57,9 +58,9 @@ async def investigate_endpoint(request: InvestigateRequest):
         investigation_id = generate_id(request.topic, "inv")
         logger.info(f"🔍 Generated investigation ID: {investigation_id}")
         
-        # TODO: Implement actual investigation logic
-        logger.info("⚙️ Processing investigation logic (placeholder)")
-        findings = f"Investigating topic: {request.topic}"
+        # Process investigation with MCP context
+        logger.info("🤖 Processing investigation with OpenShift AI agent and MCP context...")
+        findings = await process_investigation_with_context(request.topic, request.parameters)
         
         response = InvestigateResponse(
             findings=findings,

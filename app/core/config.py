@@ -19,6 +19,7 @@ class Settings:
     
     # Application Configuration
     DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "false").lower() == "true"
+    VERBOSE_MODE: bool = os.getenv("VERBOSE_MODE", "false").lower() == "true"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     
     # FastAPI Configuration
@@ -30,10 +31,40 @@ class Settings:
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
     
+    # MCP (Model Context Protocol) Configuration
+    MCP_SERVERS: str = os.getenv("MCP_SERVERS", "")
+    MCP_TIMEOUT: int = int(os.getenv("MCP_TIMEOUT", "30"))
+    MCP_ENABLED: bool = os.getenv("MCP_ENABLED", "true").lower() == "true"
+    
     @property
     def is_openai_configured(self) -> bool:
         """Check if OpenAI API key is configured."""
         return bool(self.OPENAI_API_KEY)
+    
+    @property
+    def mcp_servers_dict(self) -> dict[str, str]:
+        """Parse MCP servers configuration into a dictionary."""
+        if not self.MCP_SERVERS:
+            return {}
+        
+        servers = {}
+        try:
+            # Parse format: server_name=base_endpoint_url,server2=endpoint2
+            pairs = self.MCP_SERVERS.split(",")
+            for pair in pairs:
+                if "=" in pair:
+                    name, endpoint = pair.strip().split("=", 1)
+                    servers[name.strip()] = endpoint.strip() + "/mcp"
+        except Exception:
+            # Return empty dict if parsing fails
+            pass
+        
+        return servers
+    
+    @property
+    def is_mcp_configured(self) -> bool:
+        """Check if MCP servers are configured and enabled."""
+        return self.MCP_ENABLED and bool(self.mcp_servers_dict)
 
 # Create settings instance
 settings = Settings() 

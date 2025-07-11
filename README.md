@@ -16,6 +16,7 @@ A Python FastAPI application with a Streamlit frontend that provides three main 
   - Provides actionable troubleshooting steps and oc commands
   - Context-aware responses based on additional information provided
   - **Real-time streaming responses** for immediate feedback and better user experience
+  - **MCP Integration**: Enhanced context via Model Context Protocol servers with SSE support
 
 - **Streamlit Frontend** - Modern web interface with:
   - Sidebar navigation between different operations
@@ -49,13 +50,35 @@ A Python FastAPI application with a Streamlit frontend that provides three main 
    export OPENAI_API_KEY="your-openai-api-key-here"
    ```
 
-3. **Run the FastAPI backend:**
+3. **Configure MCP Servers (Optional):**
+   
+   MCP (Model Context Protocol) servers provide additional context to enhance AI responses.
+   
+   **In your .env file:**
+   ```bash
+   # Enable MCP integration
+   MCP_ENABLED=true
+   
+   # Configure MCP servers (comma-separated: name=base_endpoint_url)
+   MCP_SERVERS=openshift_docs=http://localhost:3001,kb_search=http://localhost:3002
+   
+   # Optional: MCP connection timeout (default: 30 seconds)
+   MCP_TIMEOUT=30
+   ```
+   
+   **MCP Server Format:**
+   - Each server should be specified as `name=base_endpoint_url`
+   - Multiple servers can be configured by separating them with commas
+   - MCP servers should provide tools that the AI agent can invoke
+   - The AI agent will automatically have access to all tools from configured MCP servers
+
+4. **Run the FastAPI backend:**
    ```bash
    python main.py
    ```
    The API will be available at `http://localhost:8000`
 
-4. **Run the Streamlit frontend (in a new terminal):**
+5. **Run the Streamlit frontend (in a new terminal):**
    ```bash
    streamlit run streamlit_app.py
    ```
@@ -161,6 +184,91 @@ A Python FastAPI application with a Streamlit frontend that provides three main 
    - **Disable streaming** for traditional request-response interaction
 6. Fill in the forms and submit requests to interact with the API
 
+## MCP Server Integration
+
+The application supports Model Context Protocol (MCP) servers to enhance AI responses with tools that provide additional capabilities and knowledge sources.
+
+### MCP Server Requirements
+
+MCP servers must implement the following endpoints:
+
+**GET /tools**
+- **Accept**: `application/json`
+- **Returns**: List of available tools
+
+**Response Format:**
+```json
+{
+  "tools": [
+    {
+      "name": "search_docs",
+      "description": "Search OpenShift documentation for specific topics",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query"
+          },
+          "category": {
+            "type": "string",
+            "description": "Documentation category (optional)"
+          }
+        },
+        "required": ["query"]
+      }
+    }
+  ]
+}
+```
+
+**POST /execute**
+- **Content-Type**: `application/json`
+- **Accept**: `application/json`
+
+**Request Body:**
+```json
+{
+  "tool": "search_docs",
+  "parameters": {
+    "query": "CrashLoopBackOff troubleshooting",
+    "category": "troubleshooting"
+  },
+  "timestamp": 1234567890.123
+}
+```
+
+**Response Format:**
+```json
+{
+  "result": "To troubleshoot CrashLoopBackOff: 1. Check logs with 'oc logs <pod>' 2. Verify resource limits...",
+  "metadata": {
+    "source": "openshift_docs",
+    "confidence": 0.95
+  }
+}
+```
+
+### MCP Integration Flow
+
+1. Application starts and loads tools from all configured MCP servers
+2. AI agent is initialized with access to all available MCP tools
+3. User submits query via `/query` or `/investigate` endpoints
+4. AI agent processes query and automatically chooses which tools to use
+5. AI agent invokes selected MCP tools to gather additional information
+6. AI agent provides enhanced response using both internal knowledge and tool results
+
+### Example MCP Tool Usage
+
+When a user asks: "Why are my pods crashing?"
+
+1. AI agent recognizes this as an OpenShift troubleshooting question
+2. AI agent may choose to use tools like:
+   - `openshift_docs_search_docs` to find relevant documentation
+   - `kb_search_find_solutions` to search knowledge base for similar issues
+3. AI agent receives tool results and incorporates them into the response
+4. User gets a comprehensive answer with relevant documentation and solutions
+
 ## Development
 
 The application follows a modular architecture with clear separation of concerns:
@@ -177,7 +285,8 @@ vibe-ols/
 │   │   ├── __init__.py
 │   │   ├── config.py        # Configuration and environment variables
 │   │   ├── logging.py       # Logging setup and configuration
-│   │   └── middleware.py    # Request/response middleware
+│   │   ├── middleware.py    # Request/response middleware
+│   │   └── mcp_client.py    # MCP (Model Context Protocol) client
 │   ├── models/              # Pydantic data models
 │   │   ├── __init__.py
 │   │   ├── requests.py      # Request models (QueryRequest, etc.)

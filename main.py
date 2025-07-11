@@ -5,6 +5,7 @@ This is the entry point that sets up the application with all routes and middlew
 
 import uvicorn
 from fastapi import FastAPI
+import asyncio
 
 from app.core.config import settings
 from app.core.logging import setup_logging, get_logger
@@ -35,6 +36,9 @@ async def startup_event():
     logger.info(f"🔧 Environment: {settings.ENVIRONMENT}")
     logger.info(f"🤖 OpenAI API Key configured: {'✅' if settings.is_openai_configured else '❌'}")
     logger.info(f"📊 Debug mode: {'✅' if settings.DEBUG_MODE else '❌'}")
+    logger.info(f"🔧 MCP enabled: {'✅' if settings.MCP_ENABLED else '❌'}")
+    if settings.MCP_ENABLED:
+        logger.info(f"🔧 MCP servers: {settings.mcp_servers_dict}")
     logger.info("🎯 Available endpoints: /query, /query/stream, /investigate, /inbox")
     logger.info("📖 Documentation: /docs, /redoc")
     
@@ -45,11 +49,23 @@ async def startup_event():
         logger.warning("🔑 Please set your OpenAI API key in your environment or .env file.")
     else:
         logger.info("✅ OpenAI API key configured successfully")
+    
+    # Note: Agent initialization is deferred to first query to avoid startup issues
+    logger.info("ℹ️ OpenShift AI Agent will be initialized on first query")
 
 # Shutdown event
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("🛑 Shutting down Vibe OLS API...")
+    
+    # Clean up MCP client resources
+    try:
+        from app.core.mcp_client import mcp_client
+        await mcp_client.cleanup()
+        logger.info("✅ MCP client cleanup completed")
+    except Exception as e:
+        logger.warning(f"⚠️ Error during MCP client cleanup: {e}")
+    
     logger.info("👋 Goodbye!")
 
 # Include route handlers

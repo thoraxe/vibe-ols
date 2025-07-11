@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from ..models.requests import QueryRequest
 from ..models.responses import QueryResponse
-from ..agents.openshift_agent import openshift_agent
+from ..agents.openshift_agent import process_query_with_context
 from ..core.logging import get_logger
 from ..utils.helpers import generate_id, prepare_prompt_with_context
 
@@ -64,14 +64,14 @@ async def query_endpoint(request: QueryRequest):
         query_id = generate_id(request.query, "query")
         logger.info(f"🔍 Generated query ID: {query_id}")
         
-        # Use Pydantic AI agent to process the query
-        logger.info("🤖 Sending query to OpenShift AI agent...")
-        result = await openshift_agent.run(full_prompt)
-        logger.info(f"✅ AI agent response received (length: {len(result.data)} chars)")
-        logger.debug(f"AI response preview: {result.data[:200]}...")
+        # Use Pydantic AI agent to process the query with MCP context
+        logger.info("🤖 Sending query to OpenShift AI agent with MCP context...")
+        result = await process_query_with_context(request.query, request.context)
+        logger.info(f"✅ AI agent response received (length: {len(result)} chars)")
+        logger.debug(f"AI response preview: {result[:200]}...")
         
         response = QueryResponse(
-            result=result.data,
+            result=result,
             status="success",
             query_id=query_id
         )
@@ -133,8 +133,7 @@ async def query_stream_endpoint(request: QueryRequest):
                 
                 # Get the full response first, then simulate streaming
                 logger.info("🤖 Getting response from OpenShift AI agent for streaming...")
-                result = await openshift_agent.run(full_prompt)
-                response_text = result.data
+                response_text = await process_query_with_context(request.query, request.context)
                 logger.info(f"✅ AI response received for streaming (length: {len(response_text)} chars)")
                 
                 # Simulate streaming by sending chunks of the response
