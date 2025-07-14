@@ -5,6 +5,7 @@ Common functionality shared across different modules.
 
 import hashlib
 from typing import Any, Dict
+from ..core.logging import get_logger
 
 def generate_id(content: str, prefix: str = "id", length: int = 8) -> str:
     """
@@ -52,4 +53,48 @@ def prepare_prompt_with_context(query: str, context: Dict[str, Any] | None = Non
         return query
     
     context_str = format_context(context)
-    return f"{query}\n\nAdditional Context:\n{context_str}" 
+    return f"{query}\n\nAdditional Context:\n{context_str}"
+
+def create_mcp_log_handler(server_name: str):
+    """
+    Create a custom logging handler for MCP server messages.
+    
+    Args:
+        server_name: Name of the MCP server for context in log messages
+        
+    Returns:
+        Async function that handles MCP log messages
+    """
+    logger = get_logger(f"mcp.{server_name}")
+    
+    async def mcp_log_handler(params):
+        """Custom handler for MCP server log messages."""
+        # Extract log information from the params object
+        level = getattr(params, 'level', 'info')
+        message = getattr(params, 'data', str(params))
+        logger_name = getattr(params, 'logger', None)
+        
+        # Map MCP log levels to Python logging levels
+        level_map = {
+            "debug": logger.debug,
+            "info": logger.info,
+            "notice": logger.info,
+            "warning": logger.warning,
+            "error": logger.error,
+            "critical": logger.critical,
+            "alert": logger.critical,
+            "emergency": logger.critical,
+        }
+        
+        # Get the appropriate logging function
+        log_func = level_map.get(level.lower(), logger.info)
+        
+        # Format the message with server context
+        formatted_message = f"[MCP:{server_name}] {message}"
+        if logger_name:
+            formatted_message = f"[MCP:{server_name}:{logger_name}] {message}"
+        
+        # Log the message
+        log_func(formatted_message)
+    
+    return mcp_log_handler 

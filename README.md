@@ -286,7 +286,7 @@ vibe-ols/
 │   │   ├── config.py        # Configuration and environment variables
 │   │   ├── logging.py       # Logging setup and configuration
 │   │   ├── middleware.py    # Request/response middleware
-│   │   └── mcp_client.py    # MCP (Model Context Protocol) client
+
 │   ├── models/              # Pydantic data models
 │   │   ├── __init__.py
 │   │   ├── requests.py      # Request models (QueryRequest, etc.)
