@@ -73,7 +73,7 @@ When responding to queries:
 5. Explain the root cause when possible
 6. Offer preventive measures to avoid similar issues
 
-Be concise but comprehensive in your responses."""
+Be concise but comprehensive in your responses. Use GitHub flavored markdown for your responses."""
     
     # Add MCP tool information to system prompt if available
     if mcp_servers:
