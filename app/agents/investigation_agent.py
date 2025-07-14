@@ -243,6 +243,58 @@ Begin your investigation now."""
         logger.exception("Full investigation error traceback:")
         return f"Investigation failed due to an error: {str(e)}"
 
+async def conduct_investigation_stream(
+    request: str, 
+    context: Optional[Dict[str, Any]] = None
+) -> AsyncIterator[str]:
+    """
+    Conduct a comprehensive investigation with real-time streaming output.
+    
+    Args:
+        request: The investigation request
+        context: Additional context information
+        
+    Yields:
+        Investigation content as it becomes available
+    """
+    logger.info(f"🌊 Starting streaming investigation: {request[:100]}...")
+    
+    # Create investigation context
+    investigation_context = InvestigationContext(request)
+    
+    # Get the investigation agent
+    agent = await get_investigation_agent()
+    
+    # Prepare the investigation prompt
+    investigation_prompt = f"""Investigation Request: {request}
+
+Please conduct a systematic investigation of this issue. Follow these guidelines:
+
+1. **Start with a clear plan**: Outline your investigation steps
+2. **Execute step by step**: Work through your plan systematically
+3. **Use tools actively**: Gather real data from the OpenShift environment
+4. **Report as you go**: Provide updates after each major step
+5. **Be thorough**: Don't stop at the first finding - investigate comprehensively
+
+Additional context: {context if context else 'No additional context provided.'}
+
+Begin your investigation now."""
+    
+    try:
+        # Run the investigation with real streaming using Agent.iter
+        logger.info("🚀 Starting real-time streaming investigation with Agent.iter...")
+        async with agent.run_mcp_servers():
+            async for content_chunk in _run_real_streaming_investigation(agent, investigation_context, investigation_prompt):
+                yield content_chunk
+        
+        logger.info(f"✅ Streaming investigation completed successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Error during streaming investigation: {str(e)}")
+        logger.exception("Full streaming investigation error traceback:")
+        error_message = f"Investigation failed due to an error: {str(e)}"
+        yield error_message
+
 async def _run_streaming_investigation(
     agent: Agent,
     context: InvestigationContext,
@@ -459,6 +511,143 @@ An error occurred during the investigation: {str(e)}
 ```
 """
         return error_report
+
+async def _run_real_streaming_investigation(
+    agent: Agent,
+    context: InvestigationContext,
+    prompt: str
+) -> AsyncIterator[str]:
+    """
+    Run the investigation with real-time streaming output using Agent.iter.
+    
+    Args:
+        agent: The investigation agent
+        context: Investigation context
+        prompt: Investigation prompt
+        
+    Yields:
+        Investigation content as it becomes available
+    """
+    logger.info("🔄 Starting real-time streaming investigation execution with Agent.iter...")
+    
+    try:
+        # Use Agent.iter to get real-time streaming output
+        logger.info("📡 Starting agent iteration for real-time streaming investigation...")
+        
+        # Track streaming state
+        tool_call_count = 0
+        llm_response_count = 0
+        
+        async with agent.iter(prompt) as agent_run:
+            async for event in agent_run:
+                # Log the event type for debugging
+                event_type = type(event).__name__
+                logger.debug(f"📨 Received streaming event: {event_type}")
+                
+                # Extract and yield content from different event types
+                if event_type == "UserPromptNode":
+                    # Initial user prompt - skip for streaming output
+                    continue
+                    
+                elif event_type == "ModelRequestNode":
+                    # LLM request - may contain tool calls and results
+                    llm_response_count += 1
+                    logger.debug(f"🧠 LLM Request #{llm_response_count}")
+                    
+                elif event_type == "CallToolsNode":
+                    # Tool calls and LLM responses - extract and yield content
+                    try:
+                        # Extract model response content from CallToolsNode
+                        if hasattr(event, 'model_response'):
+                            model_response = getattr(event, 'model_response', None)
+                            if model_response and hasattr(model_response, 'parts'):
+                                for part in model_response.parts:
+                                    # Check for TextPart content (LLM responses)
+                                    if hasattr(part, 'content') and part.content:
+                                        content = part.content
+                                        logger.debug(f"💬 Streaming LLM Response: {content[:100]}...")
+                                        context.add_llm_response(content)
+                                        yield content
+                                        
+                                    # Check for ToolCallPart (tool calls)
+                                    elif hasattr(part, 'tool_name'):
+                                        tool_name = part.tool_name
+                                        tool_call_count += 1
+                                        logger.debug(f"🔧 Tool Call #{tool_call_count}: {tool_name}")
+                                        
+                                        # Extract tool arguments if available
+                                        tool_args = {}
+                                        if hasattr(part, 'args'):
+                                            tool_args = part.args
+                                        elif hasattr(part, 'tool_call'):
+                                            tool_call = part.tool_call
+                                            if hasattr(tool_call, 'args'):
+                                                tool_args = tool_call.args
+                                        
+                                        context.add_tool_call(tool_name, tool_args)
+                                        
+                                        # Yield tool call information
+                                        tool_info = f"\n🔧 **Using tool: {tool_name}**\n"
+                                        yield tool_info
+                                        
+                                    # Check for ToolReturnPart (tool results)
+                                    elif hasattr(part, 'tool_call_id'):
+                                        tool_call_count += 1
+                                        tool_name = getattr(part, 'tool_name', 'unknown_tool')
+                                        logger.debug(f"🔧 Tool Result #{tool_call_count}: {tool_name}")
+                                        
+                                        # Extract tool result content
+                                        tool_result = getattr(part, 'content', '')
+                                        context.add_tool_call(tool_name, {}, tool_result)
+                                        
+                                        # Yield tool result summary (don't yield full result to avoid overwhelming)
+                                        tool_summary = f"✅ **Tool {tool_name} completed**\n"
+                                        yield tool_summary
+                        
+                    except Exception as e:
+                        logger.debug(f"⚠️ Error extracting from CallToolsNode: {e}")
+                                    
+                elif event_type == "End":
+                    # Final result - this should contain the complete output
+                    logger.debug("✅ Investigation completed - processing final result")
+                    try:
+                        # Try to extract data from End event
+                        if hasattr(event, 'data'):
+                            final_data = getattr(event, 'data', None)
+                            if final_data:
+                                if hasattr(final_data, 'output'):
+                                    final_output = final_data.output
+                                    logger.debug(f"📄 Final output: {final_output[:200]}...")
+                                    context.add_llm_response(final_output)
+                                    yield final_output
+                                elif hasattr(final_data, 'value'):
+                                    final_value = getattr(final_data, 'value', None)
+                                    if final_value:
+                                        logger.debug(f"📄 Final value: {str(final_value)[:200]}...")
+                                        context.add_llm_response(str(final_value))
+                                        yield str(final_value)
+                    except Exception as e:
+                        logger.debug(f"⚠️ Error extracting from End event: {e}")
+                        logger.debug("✅ Investigation completed (no extractable output)")
+                
+                # Store the event for debugging
+                context.full_output.append(f"[{event_type}] {str(event)[:200]}...")
+        
+        # Mark investigation as completed
+        context.mark_completed("Real-time streaming investigation completed successfully")
+        
+        # Log final statistics
+        logger.info(f"📊 Real-time streaming investigation completed:")
+        logger.info(f"  - Total tool calls: {tool_call_count}")
+        logger.info(f"  - Total LLM responses: {llm_response_count}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error in real-time streaming investigation: {str(e)}")
+        logger.exception("Real-time streaming investigation error traceback:")
+        
+        # Yield error information
+        error_message = f"\n❌ **Investigation Error:** {str(e)}\n"
+        yield error_message
 
 async def get_investigation_agent() -> Agent:
     """

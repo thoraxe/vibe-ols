@@ -151,11 +151,27 @@ def query_page():
 
 def investigate_page():
     st.header("🔍 Investigate")
-    st.write("Submit a topic for investigation")
+    st.write("🤖 **AI-Powered OpenShift Investigation** - Submit a topic for comprehensive investigation and get detailed analysis!")
+    
+    # Add some example investigation topics
+    st.info("**Example investigation topics:**\n"
+           "- Pods failing to start in production namespace\n"
+           "- High memory usage on worker nodes\n"
+           "- Network connectivity issues between services\n"
+           "- Persistent volume mount failures\n"
+           "- Application performance degradation\n"
+           "- Certificate expiration warnings\n"
+           "- Resource quota limit exceeded errors")
     
     with st.form("investigate_form"):
-        topic = st.text_input("Investigation Topic:")
-        parameters = st.text_area("Parameters (JSON format - optional):", height=100, help="Enter parameters as JSON")
+        topic = st.text_input("Investigation Topic:", placeholder="e.g., Pods stuck in CrashLoopBackOff in my-app namespace")
+        parameters = st.text_area("Parameters (JSON format - optional):", height=100, 
+                                 help="Enter parameters as JSON (namespace, cluster info, etc.)",
+                                 placeholder='{"namespace": "my-app", "cluster_version": "4.12", "time_range": "last 1 hour"}')
+        
+        # Add streaming toggle
+        use_streaming = st.checkbox("Enable streaming response", value=True, 
+                                   help="Get real-time streaming investigation updates instead of waiting for complete report")
         
         submitted = st.form_submit_button("Start Investigation")
         
@@ -177,15 +193,66 @@ def investigate_page():
                         "parameters": params_dict
                     }
                     
-                    with st.spinner("Investigating..."):
-                        response = requests.post(f"{API_BASE_URL}/investigate", json=payload)
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        st.success("Investigation completed!")
-                        st.json(result)
+                    if use_streaming:
+                        # Handle streaming response
+                        st.info("🔄 **Streaming Investigation:**")
+                        response_container = st.empty()
+                        accumulated_response = ""
+                        
+                        try:
+                            with st.spinner("Connecting to Investigation Agent..."):
+                                response = requests.post(f"{API_BASE_URL}/investigate/stream", json=payload, stream=True)
+                            
+                            if response.status_code == 200:
+                                st.success("Connected! Streaming investigation results...")
+                                
+                                for line in response.iter_lines():
+                                    if line:
+                                        line_str = line.decode('utf-8')
+                                        if line_str.startswith('data: '):
+                                            try:
+                                                data = json.loads(line_str[6:])  # Remove 'data: ' prefix
+                                                
+                                                if data.get('type') == 'start':
+                                                    st.write(f"**Investigation ID:** {data.get('investigation_id')}")
+                                                elif data.get('type') == 'token':
+                                                    accumulated_response += data.get('content', '')
+                                                    response_container.markdown(accumulated_response)
+                                                elif data.get('type') == 'done':
+                                                    st.success("✅ **Investigation completed!**")
+                                                    break
+                                                elif data.get('type') == 'error':
+                                                    st.error(f"❌ **Error:** {data.get('message')}")
+                                                    break
+                                                    
+                                            except json.JSONDecodeError:
+                                                continue
+                            else:
+                                st.error(f"Error: {response.status_code} - {response.text}")
+                        except Exception as e:
+                            st.error(f"Streaming error: {str(e)}")
                     else:
-                        st.error(f"Error: {response.status_code} - {response.text}")
+                        # Handle regular response
+                        with st.spinner("Investigating..."):
+                            response = requests.post(f"{API_BASE_URL}/investigate", json=payload)
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            st.success("Investigation completed!")
+                            
+                            # Display investigation metadata
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.info(f"**Investigation ID:** {result.get('investigation_id', 'N/A')}")
+                            with col2:
+                                st.info(f"**Status:** {result.get('status', 'N/A')}")
+                            
+                            # Display findings as markdown instead of JSON
+                            st.subheader("📋 Investigation Findings")
+                            findings = result.get('findings', 'No findings available')
+                            st.markdown(findings)
+                        else:
+                            st.error(f"Error: {response.status_code} - {response.text}")
                         
                 except requests.exceptions.RequestException as e:
                     st.error(f"Connection error: {e}")
