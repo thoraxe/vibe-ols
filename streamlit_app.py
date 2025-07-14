@@ -1,10 +1,19 @@
 import streamlit as st
 import requests
 import json
-from typing import Dict, Any
+from typing import Dict, Any, List
+import uuid
+from datetime import datetime
+import re
 
 # Configuration
 API_BASE_URL = "http://localhost:8000"
+
+# Initialize session state for navigation and chat history
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "query"
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
 def main():
     st.set_page_config(
@@ -13,141 +22,210 @@ def main():
         layout="wide"
     )
     
+    # Simplified CSS - removing chat bubble styling since we're using native elements
+    st.markdown("""
+    <style>
+    .nav-link {
+        display: block;
+        padding: 0.5rem 1rem;
+        margin: 0.25rem 0;
+        text-decoration: none;
+        color: #262730;
+        border-radius: 0.5rem;
+        transition: all 0.3s ease;
+    }
+    .nav-link:hover {
+        background-color: #f0f2f6;
+        text-decoration: none;
+        color: #262730;
+    }
+    .nav-link.active {
+        background-color: #ff6b6b;
+        color: white;
+        font-weight: bold;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     st.title("🔍 Vibe OLS - AI-Powered OpenShift Troubleshooting")
     st.markdown("---")
     
-    # Add info about AI capabilities
-    st.sidebar.markdown("### 🤖 AI-Powered Features")
-    st.sidebar.info("The Query endpoint uses Pydantic AI with OpenShift expertise to provide intelligent troubleshooting guidance!")
-    st.sidebar.markdown("**Configuration:** The backend uses dotenv for environment management. Create a `.env` file with your OpenAI API key.")
-    st.sidebar.markdown("**Streaming:** Enable real-time streaming responses for a better user experience!")
-    st.sidebar.markdown("**MCP Tools:** The AI agent can access external tools via Model Context Protocol (MCP) servers for enhanced capabilities!")
+    # Sidebar navigation
+    with st.sidebar:
+        st.markdown("### Navigation")
+        
+        # Create navigation links
+        pages = [
+            ("query", "🤖 AI Query"),
+            ("investigate", "🔍 Investigate"),
+            ("inbox", "📥 Inbox")
+        ]
+        
+        for page_key, page_name in pages:
+            if page_key == st.session_state.current_page:
+                st.markdown(f'<div class="nav-link active">{page_name}</div>', unsafe_allow_html=True)
+            else:
+                if st.button(page_name, key=f"nav_{page_key}"):
+                    st.session_state.current_page = page_key
+                    st.rerun()
+        
+        st.markdown("---")
+        
+        # Add info about AI capabilities
+        st.markdown("### 🤖 AI-Powered Features")
+        st.info("The Query endpoint uses Pydantic AI with OpenShift expertise to provide intelligent troubleshooting guidance!")
+        st.markdown("**Configuration:** The backend uses dotenv for environment management. Create a `.env` file with your OpenAI API key.")
+        st.markdown("**Streaming:** Enable real-time streaming responses for a better user experience!")
+        
+        # Add server status
+        st.markdown("### 🔧 Server Status")
+        try:
+            response = requests.get(f"{API_BASE_URL}/", timeout=2)
+            if response.status_code == 200:
+                st.success("✅ API Server Connected")
+            else:
+                st.error("❌ API Server Error")
+        except requests.exceptions.RequestException:
+            st.error("❌ API Server Offline")
+            st.info("Make sure the FastAPI server is running on http://localhost:8000")
     
-    # Add MCP server status
-    st.sidebar.markdown("### 🔧 MCP Server Status")
-    try:
-        response = requests.get(f"{API_BASE_URL}/", timeout=2)
-        if response.status_code == 200:
-            st.sidebar.success("✅ API Server Connected")
-        else:
-            st.sidebar.error("❌ API Server Error")
-    except requests.exceptions.RequestException:
-        st.sidebar.error("❌ API Server Offline")
-        st.sidebar.info("Make sure the FastAPI server is running on http://localhost:8000")
-    
-    # Sidebar for navigation
-    st.sidebar.title("Navigation")
-    page = st.sidebar.radio("Select Operation", ["🤖 AI Query", "🔍 Investigate", "📥 Inbox", "🔧 MCP Tools"])
-    
-    if page == "🤖 AI Query":
+    # Route to the appropriate page
+    if st.session_state.current_page == "query":
         query_page()
-    elif page == "🔍 Investigate":
+    elif st.session_state.current_page == "investigate":
         investigate_page()
-    elif page == "📥 Inbox":
+    elif st.session_state.current_page == "inbox":
         inbox_page()
-    elif page == "🔧 MCP Tools":
-        mcp_tools_page()
 
 def query_page():
-    st.header("📝 OpenShift Query")
-    st.write("🤖 **AI-Powered OpenShift Troubleshooting** - Submit your OpenShift-related questions and get expert guidance!")
+    st.header("💬 AI Chat Interface")
+    st.write("🤖 **AI-Powered OpenShift Troubleshooting** - Chat with the AI assistant for expert guidance!")
     
-    # Add some example queries
-    st.info("**Example queries:**\n"
-           "- My pods are stuck in CrashLoopBackOff state. How do I troubleshoot this?\n"
-           "- How do I check if my OpenShift cluster is healthy?\n"
-           "- What are the best practices for OpenShift resource management?\n"
-           "- How do I troubleshoot networking issues in OpenShift?\n"
-           "- List all pods in the default namespace and check their status\n"
-           "- Show me the recent events in my cluster\n"
-           "- Get the logs from a failing pod and analyze them")
+    # Display chat history using native Streamlit chat elements
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
     
-    with st.form("query_form"):
-        query_text = st.text_area("Enter your OpenShift query:", height=100, 
-                                 placeholder="e.g., My application pods are failing to start. How can I debug this?")
-        context = st.text_area("Context (JSON format - optional):", height=100, 
-                              help="Enter context as JSON (namespace, cluster version, error messages, etc.)",
-                              placeholder='{"namespace": "my-app", "cluster_version": "4.12", "error_message": "container failed to start"}')
+    # Show example queries for new users
+    if not st.session_state.chat_history:
+        st.info("**Example queries:**\n"
+               "- My pods are stuck in CrashLoopBackOff state. How do I troubleshoot this?\n"
+               "- How do I check if my OpenShift cluster is healthy?\n"
+               "- What are the best practices for OpenShift resource management?\n"
+               "- How do I troubleshoot networking issues in OpenShift?\n"
+               "- List all pods in the default namespace and check their status\n"
+               "- Show me the recent events in my cluster")
+    
+    # Add advanced options in sidebar for cleaner interface
+    with st.sidebar:
+        st.markdown("### ⚙️ Advanced Options")
+        context = st.text_area("Context (JSON):", height=80, 
+                              help="Optional context as JSON",
+                              placeholder='{"namespace": "my-app"}')
+        use_streaming = st.checkbox("Stream response", value=True, 
+                                  help="Get real-time streaming response")
         
-        # Add streaming toggle
-        use_streaming = st.checkbox("Enable streaming response", value=True, 
-                                   help="Get real-time streaming response instead of waiting for complete response")
+        if st.button("🗑️ Clear Chat History"):
+            st.session_state.chat_history = []
+            st.rerun()
+    
+    # Chat input at bottom (native Streamlit chat input)
+    if query_text := st.chat_input("Ask a question about OpenShift troubleshooting..."):
+        # Add user message to history and display it
+        user_message = {
+            "role": "user",
+            "content": query_text,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        st.session_state.chat_history.append(user_message)
         
-        submitted = st.form_submit_button("Submit Query")
+        # Display user message
+        with st.chat_message("user"):
+            st.markdown(query_text)
         
-        if submitted:
-            if query_text.strip():
+        try:
+            # Parse context if provided
+            context_dict = {}
+            if context.strip():
                 try:
-                    # Parse context if provided
-                    context_dict = {}
-                    if context.strip():
-                        try:
-                            context_dict = json.loads(context)
-                        except json.JSONDecodeError:
-                            st.error("Invalid JSON format in context field")
-                            return
-                    
-                    # Make API call
-                    payload = {
-                        "query": query_text,
-                        "context": context_dict
-                    }
-                    
-                    if use_streaming:
-                        # Handle streaming response
-                        st.info("🔄 **Streaming Response:**")
-                        response_container = st.empty()
-                        accumulated_response = ""
+                    context_dict = json.loads(context)
+                except json.JSONDecodeError:
+                    st.error("Invalid JSON format in context field")
+                    return
+            
+            # Make API call
+            payload = {
+                "query": query_text,
+                "context": context_dict
+            }
+            
+            # Display assistant response
+            with st.chat_message("assistant"):
+                if use_streaming:
+                    # Handle streaming response
+                    try:
+                        response = requests.post(f"{API_BASE_URL}/query/stream", json=payload, stream=True)
                         
-                        try:
-                            with st.spinner("Connecting to AI..."):
-                                response = requests.post(f"{API_BASE_URL}/query/stream", json=payload, stream=True)
-                            
-                            if response.status_code == 200:
-                                st.success("Connected! Streaming response...")
-                                
+                        if response.status_code == 200:
+                            # Use st.write_stream for proper streaming with typewriter effect
+                            def stream_generator():
                                 for line in response.iter_lines():
                                     if line:
                                         line_str = line.decode('utf-8')
                                         if line_str.startswith('data: '):
                                             try:
-                                                data = json.loads(line_str[6:])  # Remove 'data: ' prefix
-                                                
-                                                if data.get('type') == 'start':
-                                                    st.write(f"**Query ID:** {data.get('query_id')}")
-                                                elif data.get('type') == 'token':
-                                                    accumulated_response += data.get('content', '')
-                                                    response_container.markdown(accumulated_response)
+                                                data = json.loads(line_str[6:])
+                                                if data.get('type') == 'token':
+                                                    yield data.get('content', '')
                                                 elif data.get('type') == 'done':
-                                                    st.success("✅ **Response completed!**")
                                                     break
                                                 elif data.get('type') == 'error':
                                                     st.error(f"❌ **Error:** {data.get('message')}")
-                                                    break
-                                                    
+                                                    return
                                             except json.JSONDecodeError:
                                                 continue
-                            else:
-                                st.error(f"Error: {response.status_code} - {response.text}")
-                        except Exception as e:
-                            st.error(f"Streaming error: {str(e)}")
-                    else:
-                        # Handle regular response
-                        with st.spinner("Processing query..."):
-                            response = requests.post(f"{API_BASE_URL}/query", json=payload)
+                            
+                            # Stream the response with typewriter effect
+                            response_text = st.write_stream(stream_generator())
+                            
+                            # Add assistant response to history
+                            assistant_message = {
+                                "role": "assistant",
+                                "content": response_text,
+                                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }
+                            st.session_state.chat_history.append(assistant_message)
+                            
+                        else:
+                            st.error(f"Error: {response.status_code} - {response.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {str(e)}")
+                else:
+                    # Handle regular response
+                    try:
+                        response = requests.post(f"{API_BASE_URL}/query", json=payload)
                         
                         if response.status_code == 200:
                             result = response.json()
-                            st.success("Query processed successfully!")
-                            st.json(result)
+                            response_text = result.get('response', 'No response available')
+                            
+                            st.markdown(response_text)
+                            
+                            # Add assistant response to history
+                            assistant_message = {
+                                "role": "assistant",
+                                "content": response_text,
+                                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }
+                            st.session_state.chat_history.append(assistant_message)
                         else:
                             st.error(f"Error: {response.status_code} - {response.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {str(e)}")
                         
-                except requests.exceptions.RequestException as e:
-                    st.error(f"Connection error: {e}")
-                    st.info("Make sure the FastAPI server is running on http://localhost:8000")
-            else:
-                st.error("Please enter a query")
+        except requests.exceptions.RequestException as e:
+            st.error(f"Connection error: {e}")
+            st.info("Make sure the FastAPI server is running on http://localhost:8000")
 
 def investigate_page():
     st.header("🔍 Investigate")
@@ -303,117 +381,6 @@ def inbox_page():
                     st.info("Make sure the FastAPI server is running on http://localhost:8000")
             else:
                 st.error("Please enter a message")
-
-def mcp_tools_page():
-    st.header("🔧 MCP Tools")
-    st.write("View and test available MCP (Model Context Protocol) tools")
-    
-    # Add explanation
-    st.info("""
-    **MCP Tools** are external capabilities that the AI agent can use to enhance its responses.
-    These tools are loaded from configured MCP servers and can provide:
-    - OpenShift/Kubernetes cluster information
-    - Documentation searches
-    - Log analysis
-    - And more!
-    """)
-    
-    # Configuration section
-    st.subheader("📋 MCP Configuration")
-    st.write("To enable MCP tools, configure your `.env` file with:")
-    st.code("""
-# Enable MCP integration
-MCP_ENABLED=true
-
-# Configure MCP servers (comma-separated: name=endpoint)
-MCP_SERVERS=openshift_tools=http://localhost:8999/mcp
-
-# Optional: MCP connection timeout (default: 30 seconds)
-MCP_TIMEOUT=30
-""")
-    
-    # Tool status section
-    st.subheader("🔍 Available MCP Tools")
-    
-    if st.button("Refresh Tool List"):
-        with st.spinner("Loading MCP tools..."):
-            try:
-                # Try to get server info which might include MCP status
-                response = requests.get(f"{API_BASE_URL}/")
-                if response.status_code == 200:
-                    st.success("✅ Connected to API server")
-                    st.info("MCP tools are loaded automatically when the API server starts. Check the server logs for MCP tool loading status.")
-                else:
-                    st.error("❌ Could not connect to API server")
-            except requests.exceptions.RequestException:
-                st.error("❌ API server is not running")
-    
-    # Test query with MCP tools
-    st.subheader("🧪 Test MCP Tools")
-    st.write("Try a query that can benefit from MCP tools:")
-    
-    example_queries = [
-        "List all pods in the default namespace",
-        "Show me the configuration of my OpenShift cluster",
-        "Check the events in my cluster",
-        "Get the logs from a failing pod"
-    ]
-    
-    selected_query = st.selectbox("Example queries:", [""] + example_queries)
-    
-    if selected_query:
-        st.write(f"**Selected query:** {selected_query}")
-        if st.button("Test Query"):
-            payload = {"query": selected_query, "context": {}}
-            
-            with st.spinner("Testing query with MCP tools..."):
-                try:
-                    response = requests.post(f"{API_BASE_URL}/query", json=payload, timeout=30)
-                    if response.status_code == 200:
-                        result = response.json()
-                        st.success("✅ Query executed successfully!")
-                        st.json(result)
-                    else:
-                        st.error(f"❌ Query failed: {response.status_code} - {response.text}")
-                except requests.exceptions.RequestException as e:
-                    st.error(f"❌ Connection error: {e}")
-    
-    # Troubleshooting section
-    st.subheader("🔧 Troubleshooting")
-    st.write("Common MCP issues and solutions:")
-    
-    with st.expander("MCP Server Not Found"):
-        st.write("""
-        **Problem:** MCP server connection errors
-        
-        **Solutions:**
-        1. Check if your MCP server is running
-        2. Verify the MCP_SERVERS configuration in your .env file
-        3. Ensure the server endpoint is accessible
-        4. Check server logs for error messages
-        """)
-    
-    with st.expander("No Tools Available"):
-        st.write("""
-        **Problem:** MCP tools are not being loaded
-        
-        **Solutions:**
-        1. Verify MCP_ENABLED=true in your .env file
-        2. Check MCP_SERVERS configuration format
-        3. Restart the API server after configuration changes
-        4. Check server logs for MCP loading messages
-        """)
-    
-    with st.expander("Tool Execution Errors"):
-        st.write("""
-        **Problem:** MCP tools fail when called
-        
-        **Solutions:**
-        1. Check if required credentials are configured
-        2. Verify tool parameters are correct
-        3. Check MCP server logs for detailed error messages
-        4. Ensure the MCP server has necessary permissions
-        """)
 
 if __name__ == "__main__":
     main() 
