@@ -58,13 +58,7 @@ async def startup_event():
 async def shutdown_event():
     logger.info("🛑 Shutting down Vibe OLS API...")
     
-    # Clean up MCP client resources
-    try:
-        from app.core.mcp_client import mcp_client
-        await mcp_client.cleanup()
-        logger.info("✅ MCP client cleanup completed")
-    except Exception as e:
-        logger.warning(f"⚠️ Error during MCP client cleanup: {e}")
+    # No explicit MCP cleanup needed - Pydantic AI handles it automatically
     
     logger.info("👋 Goodbye!")
 

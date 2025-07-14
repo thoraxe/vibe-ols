@@ -4,10 +4,12 @@ Uses Pydantic AI to provide expert OpenShift guidance with MCP tools.
 """
 
 from pydantic_ai import Agent
+from pydantic_ai.models import KnownModelName
+from pydantic_ai.mcp import MCPServerStreamableHTTP
 from typing import Dict, Any, Optional
 from ..core.config import settings
 from ..core.logging import get_logger
-from ..core.mcp_client import mcp_client
+from ..utils.helpers import create_mcp_log_handler
 
 logger = get_logger(__name__)
 
@@ -20,22 +22,32 @@ async def create_openshift_agent() -> Agent:
     """
     logger.info("🤖 Initializing OpenShift AI Agent...")
     
-    # Try to load available tools from MCP servers (graceful failure)
-    mcp_tools = []
-    try:
-        logger.info("🔧 Attempting to load MCP tools...")
-        await mcp_client.load_tools()
-        mcp_tools = mcp_client.get_tools_for_agent()
+    # Create MCP server instances from configuration
+    mcp_servers = []
+    if settings.is_mcp_configured:
+        logger.info("🔧 Setting up MCP servers for OpenShift agent...")
         
-        if mcp_tools:
-            logger.info(f"✅ Loaded {len(mcp_tools)} MCP tools for the agent")
+        server_configs = settings.mcp_servers_dict
+        for server_name, endpoint in server_configs.items():
+            try:
+                # Create MCPServerStreamableHTTP instance with debug configuration
+                server = MCPServerStreamableHTTP(
+                    endpoint,
+                    tool_prefix=server_name,  # Prefix tools with server name for identification
+                    log_handler=create_mcp_log_handler(server_name),  # Custom log handler
+                    timeout=10,  # Increased timeout for better debugging
+                )
+                mcp_servers.append(server)
+                logger.info(f"✅ Added MCP server: {server_name} ({endpoint}) with debug logging")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to create MCP server {server_name} ({endpoint}): {e}")
+                
+        if mcp_servers:
+            logger.info(f"✅ Configured {len(mcp_servers)} MCP servers for OpenShift agent")
         else:
-            logger.info("ℹ️ No MCP tools available (MCP servers may not be configured)")
-            
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to load MCP tools: {e}")
-        logger.info("🔧 Agent will continue without MCP tools")
-        mcp_tools = []
+            logger.info("ℹ️ No MCP servers successfully configured for OpenShift agent")
+    else:
+        logger.info("ℹ️ No MCP servers configured for OpenShift agent")
     
     # Create the base system prompt
     system_prompt = """You are an expert OpenShift troubleshooting assistant with deep knowledge of:
@@ -64,31 +76,23 @@ When responding to queries:
 Be concise but comprehensive in your responses."""
     
     # Add MCP tool information to system prompt if available
-    if mcp_tools:
+    if mcp_servers:
         system_prompt += f"""
 
-You have access to {len(mcp_tools)} external tools that can provide additional context and information:
+You have access to external tools that can provide additional context and information:
 - Consider using available tools to gather additional context before responding
 - Tools can help you get real-time cluster information, logs, and configuration details
 - Use tools to verify current state before providing recommendations"""
     
-    agent = Agent(
-        "openai:gpt-4o-mini",  # Default model
-        system_prompt=system_prompt
-    )
+    model_name: KnownModelName = "openai:gpt-4o-mini"
+    if settings.OPENAI_MODEL:
+        model_name = settings.OPENAI_MODEL  # type: ignore
     
-    # Add MCP tools to the agent if available
-    if mcp_tools:
-        try:
-            for tool in mcp_tools:
-                # Register each tool with the agent using the proper method
-                agent.tool_plain(tool["function"])
-            logger.info(f"✅ Registered {len(mcp_tools)} MCP tools with the agent")
-        except Exception as e:
-            logger.error(f"❌ Failed to register MCP tools with agent: {e}")
-            logger.info("🔧 Agent will continue without MCP tools")
-            if settings.DEBUG_MODE:
-                logger.exception("Debug: Full exception during tool registration")
+    agent = Agent(
+        model_name,
+        system_prompt=system_prompt,
+        mcp_servers=mcp_servers
+    )
     
     logger.info("✅ OpenShift AI Agent initialized successfully")
     return agent
@@ -112,9 +116,10 @@ async def process_query_with_context(query: str, context: Optional[Dict[str, Any
     # Process with the AI agent (it will use MCP tools as needed)
     try:
         logger.debug("🤖 Sending query to OpenShift AI Agent...")
-        response = await agent.run(query)
+        async with agent.run_mcp_servers():
+            response = await agent.run(query)
         logger.info("✅ Query processed successfully")
-        return response.data
+        return response.output
     except Exception as e:
         logger.error(f"❌ Error processing query: {str(e)}")
         logger.exception("Full query error traceback:")
@@ -155,9 +160,10 @@ Context information: {context or 'No additional context provided.'}"""
     # Process with the AI agent
     try:
         logger.debug("🤖 Sending investigation to OpenShift AI Agent...")
-        response = await agent.run(investigation_prompt)
+        async with agent.run_mcp_servers():
+            response = await agent.run(investigation_prompt)
         logger.info("✅ Investigation processed successfully")
-        return response.data
+        return response.output
     except Exception as e:
         logger.error(f"❌ Error processing investigation: {str(e)}")
         logger.exception("Full investigation error traceback:")

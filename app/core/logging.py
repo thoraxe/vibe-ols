@@ -41,17 +41,22 @@ def setup_logging():
         logging.getLogger("app").setLevel(logging.DEBUG)
         logging.getLogger("__main__").setLevel(logging.DEBUG)
         
-        # Suppress noisy third-party library logs
+        # Suppress noisy third-party library logs but allow MCP debugging
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         logging.getLogger("asyncio").setLevel(logging.WARNING)
-        logging.getLogger("mcp").setLevel(logging.INFO)
+        
+        # MCP-specific logging - show at DEBUG level in debug mode
+        logging.getLogger("mcp").setLevel(logging.DEBUG)
+        logging.getLogger("pydantic_ai.mcp").setLevel(logging.DEBUG)
+        
         logging.getLogger("openai").setLevel(logging.WARNING)
         logging.getLogger("urllib3").setLevel(logging.WARNING)
         logging.getLogger("pydantic").setLevel(logging.WARNING)
         logging.getLogger("requests").setLevel(logging.WARNING)
         
         logger.debug("🐛 Debug mode enabled - application debug logs visible")
+        logger.debug("🔧 MCP debug logging enabled")
     else:
         # Normal mode - INFO level for everything
         logging.getLogger().setLevel(logging.INFO)
@@ -60,6 +65,10 @@ def setup_logging():
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         logging.getLogger("urllib3").setLevel(logging.WARNING)
+        
+        # MCP logging at INFO level in normal mode
+        logging.getLogger("mcp").setLevel(logging.INFO)
+        logging.getLogger("pydantic_ai.mcp").setLevel(logging.INFO)
     
     return logger
 
