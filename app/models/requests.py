@@ -4,7 +4,7 @@ Defines the structure and validation for incoming request data.
 """
 
 from pydantic import BaseModel
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 class QueryRequest(BaseModel):
     """Request model for query endpoints."""
@@ -42,5 +42,20 @@ class InboxRequest(BaseModel):
             "example": {
                 "message": "New alert from monitoring system",
                 "metadata": {"priority": "high", "source": "monitoring", "timestamp": "2024-01-01T00:00:00Z"}
+            }
+        }
+
+class InvestigationReportListRequest(BaseModel):
+    """Request model for listing investigation reports."""
+    limit: int = 50
+    offset: int = 0
+    search: Optional[str] = None
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "limit": 50,
+                "offset": 0,
+                "search": "pod failures"
             }
         } 

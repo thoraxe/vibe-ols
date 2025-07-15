@@ -339,48 +339,352 @@ def investigate_page():
                 st.error("Please enter a topic to investigate")
 
 def inbox_page():
-    st.header("📥 Inbox")
-    st.write("Submit a message to the inbox")
+    st.header("📥 Inbox - Investigation Reports")
     
-    with st.form("inbox_form"):
-        message = st.text_area("Message:", height=100)
-        metadata = st.text_area("Metadata (JSON format - optional):", height=100, help="Enter metadata as JSON")
+    # Initialize session state for inbox
+    if "inbox_view" not in st.session_state:
+        st.session_state.inbox_view = "list"  # "list" or "detail"
+    if "selected_reports" not in st.session_state:
+        st.session_state.selected_reports = set()
+    if "current_report_id" not in st.session_state:
+        st.session_state.current_report_id = None
+    if "inbox_page_offset" not in st.session_state:
+        st.session_state.inbox_page_offset = 0
+    if "inbox_search_query" not in st.session_state:
+        st.session_state.inbox_search_query = ""
+    if "refresh_inbox" not in st.session_state:
+        st.session_state.refresh_inbox = 0
+    
+    # Navigation between list and detail views
+    if st.session_state.inbox_view == "detail" and st.session_state.current_report_id:
+        if st.button("← Back to Reports List"):
+            st.session_state.inbox_view = "list"
+            st.session_state.current_report_id = None
+            st.rerun()
+        show_report_detail()
+    else:
+        show_reports_list()
+
+def show_reports_list():
+    """Display the list of investigation reports with search, pagination, and bulk actions."""
+    
+    # Search and pagination controls
+    col1, col2, col3 = st.columns([3, 1, 1])
+    
+    with col1:
+        search_query = st.text_input(
+            "🔍 Search reports:",
+            value=st.session_state.inbox_search_query,
+            placeholder="Search by question content...",
+            key="search_input"
+        )
+        if search_query != st.session_state.inbox_search_query:
+            st.session_state.inbox_search_query = search_query
+            st.session_state.inbox_page_offset = 0  # Reset to first page
+            st.rerun()
+    
+    with col2:
+        if st.button("🔄 Refresh"):
+            st.session_state.refresh_inbox += 1
+            st.session_state.selected_reports.clear()
+            st.rerun()
+    
+    with col3:
+        page_size = st.selectbox("Reports per page:", [10, 25, 50], index=1, key="page_size")
+    
+    # Load reports from API
+    try:
+        params = {
+            "limit": page_size,
+            "offset": st.session_state.inbox_page_offset,
+        }
+        if st.session_state.inbox_search_query:
+            params["search"] = st.session_state.inbox_search_query
         
-        submitted = st.form_submit_button("Send to Inbox")
+        with st.spinner("Loading reports..."):
+            response = requests.get(f"{API_BASE_URL}/inbox/reports", params=params)
         
-        if submitted:
-            if message.strip():
-                try:
-                    # Parse metadata if provided
-                    metadata_dict = {}
-                    if metadata.strip():
-                        try:
-                            metadata_dict = json.loads(metadata)
-                        except json.JSONDecodeError:
-                            st.error("Invalid JSON format in metadata field")
-                            return
-                    
-                    # Make API call
-                    payload = {
-                        "message": message,
-                        "metadata": metadata_dict
-                    }
-                    
-                    with st.spinner("Sending to inbox..."):
-                        response = requests.post(f"{API_BASE_URL}/inbox", json=payload)
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        st.success("Message sent to inbox!")
-                        st.json(result)
-                    else:
-                        st.error(f"Error: {response.status_code} - {response.text}")
-                        
-                except requests.exceptions.RequestException as e:
-                    st.error(f"Connection error: {e}")
-                    st.info("Make sure the FastAPI server is running on http://localhost:8000")
+        if response.status_code == 200:
+            data = response.json()
+            reports = data.get("reports", [])
+            total = data.get("total", 0)
+            
+            # Display summary info
+            st.info(f"📊 Showing {len(reports)} of {total} reports")
+            
+            if reports:
+                # Bulk actions
+                col1, col2, col3 = st.columns([2, 2, 2])
+                
+                with col1:
+                    if st.button("☑️ Select All", disabled=not reports):
+                        for report in reports:
+                            st.session_state.selected_reports.add(report["id"])
+                        st.rerun()
+                
+                with col2:
+                    if st.button("☐ Clear Selection", disabled=len(st.session_state.selected_reports) == 0):
+                        st.session_state.selected_reports.clear()
+                        st.rerun()
+                
+                with col3:
+                    selected_count = len(st.session_state.selected_reports)
+                    if st.button(f"🗑️ Delete Selected ({selected_count})", 
+                               disabled=selected_count == 0,
+                               type="primary" if selected_count > 0 else "secondary"):
+                        if selected_count > 0:
+                            delete_selected_reports()
+                
+                st.markdown("---")
+                
+                # Reports grid
+                for report in reports:
+                    show_report_summary(report)
+                
+                st.markdown("---")
+                
+                # Pagination
+                show_pagination(total, page_size)
+                
             else:
-                st.error("Please enter a message")
+                if st.session_state.inbox_search_query:
+                    st.info("🔍 No reports found matching your search criteria.")
+                else:
+                    st.info("📭 No investigation reports found. Create some investigations to see them here!")
+        
+        else:
+            st.error(f"Failed to load reports: {response.status_code} - {response.text}")
+    
+    except requests.exceptions.RequestException as e:
+        st.error(f"Connection error: {e}")
+        st.info("Make sure the FastAPI server is running on http://localhost:8000")
+
+def show_report_summary(report):
+    """Display a single report summary in the list."""
+    
+    # Create a container for the report
+    with st.container():
+        col1, col2, col3 = st.columns([0.5, 6, 1.5])
+        
+        # Checkbox for selection
+        with col1:
+            is_selected = report["id"] in st.session_state.selected_reports
+            if st.checkbox(
+                f"Select report {report['id'][:8]}",
+                value=is_selected, 
+                key=f"select_{report['id']}",
+                label_visibility="hidden"
+            ):
+                st.session_state.selected_reports.add(report["id"])
+            else:
+                st.session_state.selected_reports.discard(report["id"])
+        
+        # Report content
+        with col2:
+            # Question as clickable title
+            if st.button(
+                f"📋 {report['question'][:80]}{'...' if len(report['question']) > 80 else ''}",
+                key=f"view_{report['id']}",
+                use_container_width=True
+            ):
+                st.session_state.current_report_id = report["id"]
+                st.session_state.inbox_view = "detail"
+                st.rerun()
+            
+            # Parameters and metadata
+            if report.get("parameters"):
+                params_text = ", ".join([f"{k}: {v}" for k, v in report["parameters"].items()])
+                st.caption(f"🔧 Parameters: {params_text[:100]}{'...' if len(params_text) > 100 else ''}")
+            
+            # Created date and report length
+            created_date = datetime.fromisoformat(report["created_at"].replace('Z', '+00:00'))
+            st.caption(f"📅 Created: {created_date.strftime('%Y-%m-%d %H:%M')} | 📄 Length: {report['report_length']:,} chars")
+        
+        # Quick actions
+        with col3:
+            if st.button("👁️ View", key=f"quick_view_{report['id']}", use_container_width=True):
+                st.session_state.current_report_id = report["id"]
+                st.session_state.inbox_view = "detail"
+                st.rerun()
+    
+    st.divider()
+
+def show_pagination(total, page_size):
+    """Display pagination controls."""
+    
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    current_page = (st.session_state.inbox_page_offset // page_size) + 1
+    
+    col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+    
+    with col1:
+        if st.button("⏪ First", disabled=current_page == 1):
+            st.session_state.inbox_page_offset = 0
+            st.rerun()
+    
+    with col2:
+        if st.button("◀️ Prev", disabled=current_page == 1):
+            st.session_state.inbox_page_offset = max(0, st.session_state.inbox_page_offset - page_size)
+            st.rerun()
+    
+    with col3:
+        st.write(f"📄 Page {current_page} of {total_pages}")
+    
+    with col4:
+        if st.button("▶️ Next", disabled=current_page == total_pages):
+            st.session_state.inbox_page_offset = min((total_pages - 1) * page_size, st.session_state.inbox_page_offset + page_size)
+            st.rerun()
+    
+    with col5:
+        if st.button("⏩ Last", disabled=current_page == total_pages):
+            st.session_state.inbox_page_offset = (total_pages - 1) * page_size
+            st.rerun()
+
+def show_report_detail():
+    """Display detailed view of a specific investigation report."""
+    
+    try:
+        with st.spinner("Loading report details..."):
+            response = requests.get(f"{API_BASE_URL}/inbox/reports/{st.session_state.current_report_id}")
+        
+        if response.status_code == 200:
+            report = response.json()
+            
+            # Report header
+            st.subheader("📋 Investigation Report Details")
+            
+            # Question - prominently displayed
+            st.markdown("### ❓ Investigation Question")
+            st.markdown(f"**{report['question']}**")
+            
+            # Parameters - prominently displayed if present
+            if report.get("parameters"):
+                st.markdown("### 🔧 Parameters")
+                st.json(report["parameters"])
+            
+            # Metadata and actions
+            col1, col2, col3 = st.columns([2, 2, 1])
+            
+            with col1:
+                st.info(f"**Report ID:** {report['id']}")
+            
+            with col2:
+                created_date = datetime.fromisoformat(report["created_at"].replace('Z', '+00:00'))
+                st.info(f"**Created:** {created_date.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            with col3:
+                # Delete button for single report
+                if st.button("🗑️ Delete", type="secondary", use_container_width=True):
+                    if delete_single_report(report["id"]):
+                        st.session_state.inbox_view = "list"
+                        st.session_state.current_report_id = None
+                        st.rerun()
+            
+            st.markdown("---")
+            
+            # Report content
+            st.markdown("### 📄 Investigation Report")
+            
+            # Display report text with syntax highlighting if it looks like markdown
+            report_text = report.get("report_text", "No report content available.")
+            
+            if report_text.strip().startswith("#") or "```" in report_text:
+                # Looks like markdown
+                st.markdown(report_text)
+            else:
+                # Plain text
+                st.text_area(
+                    "Report Content:",
+                    value=report_text,
+                    height=400,
+                    disabled=True
+                )
+            
+        elif response.status_code == 404:
+            st.error("❌ Report not found. It may have been deleted.")
+            st.session_state.inbox_view = "list"
+            st.session_state.current_report_id = None
+        else:
+            st.error(f"Failed to load report: {response.status_code} - {response.text}")
+    
+    except requests.exceptions.RequestException as e:
+        st.error(f"Connection error: {e}")
+        st.info("Make sure the FastAPI server is running on http://localhost:8000")
+
+def delete_selected_reports():
+    """Delete all selected reports."""
+    
+    if not st.session_state.selected_reports:
+        st.warning("No reports selected for deletion.")
+        return
+    
+    # Confirmation dialog
+    selected_count = len(st.session_state.selected_reports)
+    
+    # Use a form for confirmation to avoid accidental deletions
+    with st.form("confirm_bulk_delete"):
+        st.warning(f"⚠️ Are you sure you want to delete {selected_count} selected report(s)? This action cannot be undone.")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            confirm_delete = st.form_submit_button("🗑️ Confirm Delete", type="primary")
+        with col2:
+            cancel_delete = st.form_submit_button("❌ Cancel")
+        
+        if confirm_delete:
+            success_count = 0
+            error_count = 0
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            selected_list = list(st.session_state.selected_reports)
+            
+            for i, report_id in enumerate(selected_list):
+                status_text.text(f"Deleting report {i+1} of {len(selected_list)}...")
+                progress_bar.progress((i + 1) / len(selected_list))
+                
+                try:
+                    response = requests.delete(f"{API_BASE_URL}/inbox/reports/{report_id}")
+                    if response.status_code == 200:
+                        success_count += 1
+                    else:
+                        error_count += 1
+                        st.error(f"Failed to delete report {report_id}: {response.status_code}")
+                except requests.exceptions.RequestException as e:
+                    error_count += 1
+                    st.error(f"Connection error deleting report {report_id}: {e}")
+            
+            # Clear selection and show results
+            st.session_state.selected_reports.clear()
+            
+            if success_count > 0:
+                st.success(f"✅ Successfully deleted {success_count} report(s)")
+            if error_count > 0:
+                st.error(f"❌ Failed to delete {error_count} report(s)")
+            
+            # Refresh the list
+            st.session_state.refresh_inbox += 1
+            st.rerun()
+        
+        elif cancel_delete:
+            st.info("Deletion cancelled.")
+
+def delete_single_report(report_id: str) -> bool:
+    """Delete a single report by ID. Returns True if successful."""
+    
+    try:
+        response = requests.delete(f"{API_BASE_URL}/inbox/reports/{report_id}")
+        if response.status_code == 200:
+            st.success("✅ Report deleted successfully!")
+            st.session_state.refresh_inbox += 1
+            return True
+        else:
+            st.error(f"Failed to delete report: {response.status_code} - {response.text}")
+            return False
+    except requests.exceptions.RequestException as e:
+        st.error(f"Connection error: {e}")
+        return False
 
 if __name__ == "__main__":
     main() 
