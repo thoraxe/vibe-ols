@@ -14,11 +14,15 @@ from ..models.responses import InvestigateResponse
 from ..agents.investigation_agent import conduct_investigation, conduct_investigation_stream
 from ..core.logging import get_logger
 from ..utils.helpers import generate_id
+from ..services.investigation_service import investigation_service
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/investigate", tags=["Investigation Operations"])
 
+# TODO: investigating may take a long time, so this endpoint should return immediately
+#       an acknowledgement that the investigation has started and return the unique ID.
+#       The rest of the investigation should be done in the background.
 @router.post(
     "/", 
     response_model=InvestigateResponse,
@@ -65,6 +69,19 @@ async def investigate_endpoint(request: InvestigateRequest):
         # Process investigation with specialized investigation agent
         logger.info("🤖 Processing investigation with OpenShift Investigation Agent...")
         findings = await conduct_investigation(request.topic, request.parameters)
+        
+        # Store the investigation report in the database
+        try:
+            stored_report = await investigation_service.store_investigation_report(
+                question=request.topic,
+                parameters=request.parameters,
+                report_text=findings,
+                investigation_id=investigation_id
+            )
+            logger.info(f"💾 Investigation report stored in database: {stored_report.id}")
+        except Exception as e:
+            logger.error(f"❌ Failed to store investigation report: {str(e)}")
+            # Continue with response even if database storage fails
         
         response = InvestigateResponse(
             findings=findings,
@@ -128,11 +145,28 @@ async def investigate_stream_endpoint(request: InvestigateRequest):
                 # Use real-time streaming investigation
                 logger.info("🤖 Starting real-time investigation streaming from OpenShift Investigation Agent...")
                 
+                # Accumulate the complete report for database storage
+                complete_report = ""
+                
                 async for content_chunk in conduct_investigation_stream(request.topic, request.parameters):
                     # Stream each content chunk as it becomes available
                     if content_chunk:
+                        complete_report += content_chunk
                         yield f"data: {json.dumps({'type': 'token', 'content': content_chunk})}\n\n"
                         await asyncio.sleep(0.01)  # Small delay to prevent overwhelming the client
+                
+                # Store the complete investigation report in the database
+                try:
+                    stored_report = await investigation_service.store_investigation_report(
+                        question=request.topic,
+                        parameters=request.parameters,
+                        report_text=complete_report,
+                        investigation_id=investigation_id
+                    )
+                    logger.info(f"💾 Streaming investigation report stored in database: {stored_report.id}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to store streaming investigation report: {str(e)}")
+                    # Continue with response even if database storage fails
                 
                 # Send completion message
                 yield f"data: {json.dumps({'type': 'done', 'investigation_id': investigation_id})}\n\n"

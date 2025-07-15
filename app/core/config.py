@@ -22,6 +22,10 @@ class Settings:
     VERBOSE_MODE: bool = os.getenv("VERBOSE_MODE", "false").lower() == "true"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     
+    # Database Configuration
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./investigation_reports.db")
+    DATABASE_ECHO: bool = os.getenv("DATABASE_ECHO", "false").lower() == "true"
+    
     # FastAPI Configuration
     APP_TITLE: str = "Vibe OLS API"
     APP_DESCRIPTION: str = "API for query, investigate, and inbox operations with comprehensive documentation"
