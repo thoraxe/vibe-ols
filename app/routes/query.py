@@ -131,6 +131,9 @@ async def query_stream_endpoint(request: QueryRequest):
                 # Send initial message with query ID
                 yield f"data: {json.dumps({'type': 'start', 'query_id': query_id})}\n\n"
                 
+                # TODO: this is broken. we should not be waiting for the full response and then simulating
+                # streaming. we should be streaming the response as it is generated.
+
                 # Get the full response first, then simulate streaming
                 logger.info("🤖 Getting response from OpenShift AI agent for streaming...")
                 response_text = await process_query_with_context(request.query, request.context)
